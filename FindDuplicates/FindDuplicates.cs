@@ -50,15 +50,66 @@ namespace Discriminator
                         tw4.Wait();
                     }
                 }
+                Console.WriteLine("total amount of matches {0}", totalMatches);
+                var trueMatches = new Dictionary<Tuple<long, long>, bool>();
+                foreach (var k in matches)
+                {
+                    if (k.Value)
+                        trueMatches.Add(k.Key, k.Value);
+                }
+                Console.WriteLine("matched pairs = {0}", trueMatches.Count);
+                var allIdx = new long[cnt];
+                for (int i = 0; i < cnt; ++i)
+                    allIdx[i] = i;
+                bool again;
+                do {
+                    again = false;
+                    foreach(var k in trueMatches)
+                    {
+                        var opic = k.Key.Item1;
+                        var pic = k.Key.Item2;
+                        if(opic>pic)
+                        {
+                            Console.Error.WriteLine("Hm...");
+                        }
+                        if(allIdx[pic]>allIdx[opic])
+                        {
+                            again = true;
+                            allIdx[pic] = allIdx[opic];
+                        }
+                    }
+                } while (again);
+                var allSets = new Dictionary<long, List<long> > ();
+                for(int i = 0; i < cnt; ++i)
+                {
+                    var ai = allIdx[i];
+                    if (ai != i)
+                    {
+                        List<long> ll;
+                       if(! allSets.TryGetValue(ai, out ll))
+                        {
+                            ll = new List<long>();
+                            ll.Add(ai);
+                            allSets.Add(ai, ll);
+                        }
+                        ll.Add(i);
+                    }
+                }
+                using (var setWriter = File.CreateText("sets.txt"))
+                {
+                    foreach(var sl in allSets)
+                    {
+                        var ll=sl.Value;
+                        String line = String.Format("+{0}", ll[0]+1);
+                        setWriter.WriteLine(line);
+                        for (int i = 1; i < ll.Count; ++i)
+                        {
+                            line = String.Format("-{0}", ll[i] + 1);
+                            setWriter.WriteLine(line);
+                        }
+                    }
+                }
             }
-            Console.WriteLine("total amount of matches {0}", totalMatches);
-            var trueMatches= new Dictionary<Tuple<long, long>, bool>();
-            foreach (var k in matches)
-            {
-                if (k.Value)
-                    trueMatches.Add(k.Key, k.Value);
-            }
-            Console.WriteLine("matched pairs = {0}", trueMatches.Count);
         }
 
         private void analyze(List<long> picList)
@@ -176,7 +227,7 @@ namespace Discriminator
                     for (int k = 0; k < ChunkSize; ++k)
                         total += Math.Abs(otherPicBytes[k] - picBytes[k]);
                     total /= ChunkSize;
-                    if (total < 0.05) // 5% difference 
+                    if (total < 255/5) // 5% difference 
                     {
                         Console.Out.WriteLine("seems similar {0} {1}", opic, pic);
                         submit(opic, pic, true);
