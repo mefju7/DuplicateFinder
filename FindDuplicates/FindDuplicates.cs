@@ -12,7 +12,7 @@ namespace Discriminator
     {
         private const int ChunkSize = 3 * 16 * 16;
         private const string BinFile = "files.bin";
-        ConcurrentBag<Task> allTasks = new ConcurrentBag<Task>();
+        
         object myLock = new object(); // just for synchronizing
         Dictionary<Tuple<long, long>, Boolean> matches = new Dictionary<Tuple<long, long>, bool>();
         private MemoryMappedViewAccessor acc;
@@ -42,12 +42,14 @@ namespace Discriminator
                     for (long i = 0; i < cnt; ++i)
                         l.Add(i);
                     var t = Task.Run(() => analyze(l));
-                    allTasks.Add(t);
-                    Task tw4;
-                    while (allTasks.TryTake(out tw4))
+                    Console.Out.WriteLine("Let's start...");
+                    var n1 = DateTime.Now;
+                    Thread.Sleep(2000);
+                    while (Wait4It.Working)
                     {
-                        // Console.Out.WriteLine("waiting for task");
-                        tw4.Wait();
+                        var wUntil = DateTime.Now;
+                        Console.WriteLine(" {0} -- {1}", totalMatches, wUntil.ToString("HH:mm:ss"));
+                        Thread.Sleep(2000);
                     }
                 }
                 Console.WriteLine("total amount of matches {0}", totalMatches);
@@ -114,6 +116,7 @@ namespace Discriminator
 
         private void analyze(List<long> picList)
         {
+            var w4it = new Wait4It();
             // the discriminator
             var disc = new double[ChunkSize];
             for (int i = 0; i < ChunkSize; ++i)
@@ -198,14 +201,14 @@ namespace Discriminator
                         t = Task.Run(() => match(l));
                     else
                         t = Task.Run(() => analyze(l));
-                    allTasks.Add(t);
+                   
                 }
             }
         }
 
         private void match(List<long> l)
         {
-
+            var w4it = new Wait4It();
             Console.Out.WriteLine("matching list with {0}", l.Count);
             var picBytes = new byte[ChunkSize];
             var otherPicBytes = new byte[ChunkSize];

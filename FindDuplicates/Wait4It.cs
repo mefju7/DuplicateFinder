@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace ThumbCollector
+namespace Discriminator
 {
     internal class Wait4It
     {
