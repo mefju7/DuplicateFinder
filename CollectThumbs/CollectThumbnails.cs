@@ -11,10 +11,11 @@ namespace ThumbCollector
     {
         private const int ChunkSize = 3 * 16 * 16;
         private const int DisplayDelay = 2;
-        Semaphore sem = new Semaphore(1, 1);
-        // ConcurrentBag<Task> allTasks = new ConcurrentBag<Task>();
         object myLock = new object(); // just for synchronizing
         long saved = 0;
+        object countLock = new object();
+        long f2scan = 0;
+        long finished = 0;
         private StreamWriter txtFile;
         private FileStream binFile;
 
@@ -27,36 +28,38 @@ namespace ThumbCollector
             using (txtFile = File.CreateText("files.txt"))
             using (binFile = File.OpenWrite("files.bin"))
             {
-                var wait4it = new Wait4It(sem);
-                foreach (var a in args)
                 {
-                    var t = Task.Run(() => scan(a));
-                    // allTasks.Add(t);
-                }
-                Task t2w4;
-                var last = DateTime.Now.AddSeconds(DisplayDelay);
-                long finished = 0;
-                while (allTasks.TryTake(out t2w4))
-                {
-                    ++finished;
-                    if (t2w4.IsCompleted)
-                        continue;
-                    t2w4.Wait();
-                    var n=DateTime.Now;
-                    if(n > last)
+                    foreach (var a in args)
                     {
-                        var t = allTasks.Count;
-                        Console.WriteLine("{0} / {1} => {2}", finished, finished+t,saved);
-                        last = n.AddSeconds(DisplayDelay);
+                        var t = Task.Run(() => scan(a));
                     }
                 }
-
+                Console.Out.WriteLine("Let's start...");
+                Thread.Sleep(2000);
+                var n = DateTime.Now;
+                while(Wait4It.Working)
+                {
+                    double t1 = finished;
+                    double t2 = f2scan;
+                    double per = 0;
+                    var finishAt = DateTime.Now;
+                    if (t2 > 0)
+                    {
+                        per = t1 / t2;
+                        var n2 = DateTime.Now;
+                        var ts = n2.Subtract(n);
+                        var s2w=ts.TotalSeconds * (t2 - t1) / t2;
+                        finishAt= n2.AddSeconds(s2w);
+                    }
+                    Console.WriteLine("scanning: {0:0,0} / {1:0,0} ({2:0%}) => {3} -- {4}",t1,t2,per, saved,finishAt.ToString("HH:mm:ss"));
+                    Thread.Sleep(5000);
+                }
             }
         }
 
         private void scan(string dir)
         {
-            // Console.Out.WriteLine("Scanning for {0}", dir);
+            var w4i = new Wait4It();
             try
             {
                 if (Directory.Exists(dir))
@@ -65,13 +68,15 @@ namespace ThumbCollector
                     foreach (var d in dirs)
                     {
                         var t = Task.Run(() => scan(d));
-                        allTasks.Add(t);
                     }
                     var files = Directory.EnumerateFiles(dir);
                     foreach (var f in files)
                     {
+                        lock (countLock)
+                        {
+                            ++f2scan;
+                        }
                         var t = Task.Run(() => getThumb(f));
-                        allTasks.Add(t);
                     }
                 }
             }
@@ -80,6 +85,8 @@ namespace ThumbCollector
 
         private void getThumb(string f)
         {
+            var w4i = new Wait4It();
+            
             try
             {
                 using (var img = Image.FromFile(f))
@@ -108,17 +115,23 @@ namespace ThumbCollector
                     }
                 }
             }
-            catch (OutOfMemoryException)
+            catch (Exception)
             {
-                // ignore
+                // ignore all exceptions
             }
-            finally { }
+            finally {
+                lock (countLock)
+                {
+                    ++finished;
+                }
+            }
         }
 
         private void store(string f, byte[] b)
         {
             lock (myLock)
             {
+               
                 txtFile.WriteLine(f);
                 binFile.Write(b, 0, ChunkSize);
                 ++saved;

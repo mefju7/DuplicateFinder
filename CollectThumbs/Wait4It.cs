@@ -1,20 +1,31 @@
-﻿using System.Threading;
+﻿using System;
 
 namespace ThumbCollector
 {
     internal class Wait4It
     {
-        private Semaphore sem;
-
-        public Wait4It(Semaphore sem)
+        private static object lockObject = new object();
+        private static int simultaneous = 0;
+        public Wait4It()
         {
-            this.sem = sem;
-            sem.WaitOne();
+            lock (lockObject)
+            {
+                ++simultaneous;
+            }
         }
         ~Wait4It()
         {
-            sem.Release();
+            lock (lockObject)
+            {
+                --simultaneous;
+            }
         }
-       
+
+        public static bool Working {
+            get {
+                // Console.Out.WriteLine("have approx {0}", simultaneous);
+                return simultaneous > 0;
+            }
+        }
     }
 }
