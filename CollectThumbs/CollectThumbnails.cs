@@ -36,8 +36,8 @@ namespace ThumbCollector
                 }
                 Console.Out.WriteLine("Let's start...");
                 Thread.Sleep(2000);
-                var n = DateTime.Now;
-                while(Wait4It.Working)
+                var startedAt = DateTime.Now;
+                while (Wait4It.Working)
                 {
                     double t1 = finished;
                     double t2 = f2scan;
@@ -45,13 +45,14 @@ namespace ThumbCollector
                     var finishAt = DateTime.Now;
                     if (t2 > 0)
                     {
-                        per = t1 / t2;
-                        var n2 = DateTime.Now;
-                        var ts = n2.Subtract(n);
-                        var s2w=ts.TotalSeconds * (t2 - t1) / t2;
-                        finishAt= n2.AddSeconds(s2w);
+                        per = t1 / t2;          
+                        var ts = finishAt.Subtract(startedAt);
+                        double s2w = 0;
+                        if (t1 > 0)
+                            s2w = ts.TotalSeconds * (t2 - t1) / t1;
+                        finishAt = finishAt.AddSeconds(s2w);
                     }
-                    Console.WriteLine("scanning: {0:0,0} / {1:0,0} ({2:0%}) => {3} -- {4}",t1,t2,per, saved,finishAt.ToString("HH:mm:ss"));
+                    Console.WriteLine("scanning: {0:0,0} / {1:0,0} ({2:0%}) => {3} -- {4}", t1, t2, per, saved, finishAt.ToString("HH:mm:ss"));
                     Thread.Sleep(5000);
                 }
             }
@@ -86,7 +87,7 @@ namespace ThumbCollector
         private void getThumb(string f)
         {
             var w4i = new Wait4It();
-            
+
             try
             {
                 using (var img = Image.FromFile(f))
@@ -119,7 +120,8 @@ namespace ThumbCollector
             {
                 // ignore all exceptions
             }
-            finally {
+            finally
+            {
                 lock (countLock)
                 {
                     ++finished;
@@ -131,13 +133,13 @@ namespace ThumbCollector
         {
             lock (myLock)
             {
-               
+
                 txtFile.WriteLine(f);
                 binFile.Write(b, 0, ChunkSize);
                 ++saved;
             }
         }
 
-       
+
     }
 }

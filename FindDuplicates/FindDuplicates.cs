@@ -14,10 +14,12 @@ namespace Discriminator
         private const string BinFile = "files.bin";
         
         object myLock = new object(); // just for synchronizing
+        object countLock = new object(); // for synchronizing counting
         Dictionary<Tuple<long, long>, Boolean> matches = new Dictionary<Tuple<long, long>, bool>();
         private MemoryMappedViewAccessor acc;
-        private Random rnd;
         private long totalMatches = 0;
+        private long listLength2run = 0;
+        private long listLengthDone = 0;
 
         public FindDuplicates()
         {
@@ -25,7 +27,6 @@ namespace Discriminator
 
         internal void run()
         {
-            rnd = new Random();
             if (File.Exists(BinFile))
             {
                 var fi = new FileInfo(BinFile);
@@ -41,14 +42,28 @@ namespace Discriminator
                     var l = new List<long>();
                     for (long i = 0; i < cnt; ++i)
                         l.Add(i);
+                    listLength2run = cnt;
                     var t = Task.Run(() => analyze(l));
                     Console.Out.WriteLine("Let's start...");
-                    var n1 = DateTime.Now;
+                    var startedAt = DateTime.Now;
                     Thread.Sleep(2000);
+                    double per = 0;
                     while (Wait4It.Working)
                     {
-                        var wUntil = DateTime.Now;
-                        Console.WriteLine(" {0} -- {1}", totalMatches, wUntil.ToString("HH:mm:ss"));
+                        var finishAt = DateTime.Now;
+                        if (listLength2run > 0)
+                        {
+                            double t1 = listLengthDone;
+                            double t2 = listLength2run;
+                            per = t1/t2;
+                            var ts = finishAt.Subtract(startedAt);
+                            double s2w = 0; //seconds to wait
+                            if (t1 > 0)
+                                s2w = ts.TotalSeconds * (t2 - t1) / t1;
+                            finishAt = finishAt.AddSeconds(s2w);
+                            
+                        }
+                        Console.WriteLine("divide {0} -- {1}", totalMatches, finishAt.ToString("HH:mm:ss"));
                         Thread.Sleep(2000);
                     }
                 }
