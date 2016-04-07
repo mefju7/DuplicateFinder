@@ -35,7 +35,7 @@ namespace ThumbCollector
                     }
                 }
                 Console.Out.WriteLine("Let's start...");
-                Thread.Sleep(2000);
+                Thread.Sleep(500);
                 var startedAt = DateTime.Now;
                 while (Wait4It.Working)
                 {
@@ -52,7 +52,7 @@ namespace ThumbCollector
                             s2w = ts.TotalSeconds * (t2 - t1) / t1;
                         finishAt = finishAt.AddSeconds(s2w);
                     }
-                    Console.WriteLine("scanning: {0:0,0} / {1:0,0} ({2:0%}) => {3} -- {4}", t1, t2, per, saved, finishAt.ToString("HH:mm:ss"));
+                    Console.WriteLine("scanning: {0:#,0} / {1:#,0} ({2:0%}) => {3} -- {4}", t1, t2, per, saved, finishAt.ToString("HH:mm:ss"));
                     Thread.Sleep(5000);
                 }
             }

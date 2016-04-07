@@ -6,6 +6,7 @@ namespace ThumbCollector
     {
         private static object lockObject = new object();
         private static int simultaneous = 0;
+        private static int lastNumber = 0;
         public Wait4It()
         {
             lock (lockObject)
@@ -24,9 +25,13 @@ namespace ThumbCollector
         public static bool Working {
             get {
                 // Console.Out.WriteLine("have approx {0}", simultaneous);
-                var rv = simultaneous > 0;
-                GC.Collect();
-                return rv;
+                if (simultaneous == lastNumber)
+                {
+                    Console.Out.WriteLine("forcing GC.collect();");
+                    GC.Collect();
+                }
+                lastNumber = simultaneous;
+                return simultaneous > 0;
             }
         }
     }
