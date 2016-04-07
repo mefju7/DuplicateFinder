@@ -12,17 +12,18 @@ namespace Discriminator
     {
         private const int ChunkSize = 3 * 16 * 16;
         private const string BinFile = "files.bin";
-        private const int MaxIter = 100;
-        private const int MaxPicturesInDiscriminator = 50;
-        private const double MinimalDiff = 768; // 3 bits per pixel
-
+        private const int MaxIter = 16;
+        private const int MaxPicturesInDiscriminator = 32;
+        private const double MinimalDiff = ChunkSize*3; // 
+        private const int MaxDiff = 64;
         object myLock = new object(); // just for synchronizing
         object countLock = new object(); // for synchronizing counting
-        Dictionary<Tuple<long, long>, Boolean> matches = new Dictionary<Tuple<long, long>, bool>();
+        HashSet<Tuple<int, int>> considered = new HashSet<Tuple<int, int>>();
+        HashSet<Tuple<int, int>> matches = new HashSet<Tuple<int, int>>();
+        private double totalMatches = 0;
+        private long matchesDone = 0;
         private MemoryMappedViewAccessor acc;
-        private long totalMatches = 0;
-        private long listLength2run = 0;
-        private long listLengthDone = 0;
+        private object mmfLock = new object();
 
         public FindDuplicates()
         {
@@ -34,6 +35,7 @@ namespace Discriminator
             {
                 var fi = new FileInfo(BinFile);
                 long cnt = fi.Length / ChunkSize;
+                totalMatches = cnt * (cnt - 1) / 2;
                 if (fi.Length != cnt * ChunkSize)
                 {
                     Console.Error.WriteLine("Size of binfile is wrong");
@@ -42,143 +44,162 @@ namespace Discriminator
                 using (var mmf = MemoryMappedFile.CreateFromFile(BinFile))
                 using (acc = mmf.CreateViewAccessor())
                 {
-                    var l = new List<long>();
-                    for (long i = 0; i < cnt; ++i)
+                    var l = new List<int>();
+                    for (int i = 0; i < cnt; ++i)
                         l.Add(i);
-                    listLength2run = cnt;
                     var t = Task.Run(() => analyze(l));
                     Console.Out.WriteLine("Let's start...");
-                    var startedAt = DateTime.Now;
                     Thread.Sleep(2000);
                     double per = 0;
+                    var leftTime = new LeftTime();
                     while (Wait4It.Working)
                     {
-                        var finishAt = DateTime.Now;
-                            double t1 = listLengthDone;
-                            double t2 = listLength2run;
-                        if (listLength2run > 0)
-                        {
-                            per = t1 / t2;
-                            var ts = finishAt.Subtract(startedAt);
-                            double s2w = 0; //seconds to wait
-                            if (t1 > 0)
-                                s2w = ts.TotalSeconds * (t2 - t1) / t1;
-                            finishAt = finishAt.AddSeconds(s2w);
-
-                        }
-                        Console.WriteLine("divide {0:#,0} / {1:#,0} --> matches {2}, finished at {3}", t1, t2, totalMatches, finishAt.ToString("HH:mm:ss"));
+                        per = matchesDone / totalMatches;
+                        var finishAt = leftTime.get(totalMatches - matchesDone);
+                        Console.WriteLine("divide {0:#,0} / {1:#,0} ({2:0%}) --> cand {3}, finished at {4}",
+                            matchesDone, totalMatches, per, matches.Count, finishAt.ToString("MM-dd HH:mm:ss"));
                         Thread.Sleep(2000);
                     }
                 }
-                Console.WriteLine("total amount of matches {0}", totalMatches);
-                var trueMatches = new Dictionary<Tuple<long, long>, bool>();
-                foreach (var k in matches)
+                Console.Out.WriteLine("Combining");
+                Dictionary<int, HashSet<int>> sets = new Dictionary<int, HashSet<int>>();
+                foreach(var m in matches)
                 {
-                    if (k.Value)
-                        trueMatches.Add(k.Key, k.Value);
-                }
-                Console.WriteLine("matched pairs = {0}", trueMatches.Count);
-                var allIdx = new long[cnt];
-                for (int i = 0; i < cnt; ++i)
-                    allIdx[i] = i;
-                bool again;
-                do
-                {
-                    again = false;
-                    foreach (var k in trueMatches)
+                    var nhs = new HashSet<int>();
+                    var items = new int[] { m.Item1, m.Item2 };
+                    foreach(var it in items)
                     {
-                        var opic = k.Key.Item1;
-                        var pic = k.Key.Item2;
-                        if (opic > pic)
+                        nhs.Add(it);
+                        HashSet<int> oldOne;
+                        if (sets.TryGetValue(it, out oldOne))
                         {
-                            Console.Error.WriteLine("Hm...");
-                        }
-                        if (allIdx[pic] > allIdx[opic])
-                        {
-                            again = true;
-                            allIdx[pic] = allIdx[opic];
+                            nhs.UnionWith(oldOne);
                         }
                     }
-                } while (again);
-                var allSets = new Dictionary<long, List<long>>();
-                for (int i = 0; i < cnt; ++i)
-                {
-                    var ai = allIdx[i];
-                    if (ai != i)
+                    foreach(var it in nhs)
                     {
-                        List<long> ll;
-                        if (!allSets.TryGetValue(ai, out ll))
-                        {
-                            ll = new List<long>();
-                            ll.Add(ai);
-                            allSets.Add(ai, ll);
-                        }
-                        ll.Add(i);
+                        sets.Remove(it);
+                        sets.Add(it, nhs);
                     }
                 }
+                List<int> keys = new List<int>();
+                keys.AddRange(sets.Keys);
+                List<HashSet<int>> allSets = new List<HashSet<int>>();
+                int totalCount = 0;
+                foreach(var it in keys)
+                {
+                    HashSet<int> foundSet;
+                    if (sets.TryGetValue(it, out foundSet))
+                    {
+                        totalCount += foundSet.Count;
+                        allSets.Add(foundSet);
+                        foreach (var k in foundSet)
+                            sets.Remove(k);
+                    }
+                }
+                Console.WriteLine("found {0} duplicates", totalCount - allSets.Count);
                 using (var setWriter = File.CreateText("sets.txt"))
                 {
-                    foreach (var sl in allSets)
+                    foreach(var set in allSets)
                     {
-                        var ll = sl.Value;
-                        String line = String.Format("+{0}", ll[0] + 1);
-                        setWriter.WriteLine(line);
-                        for (int i = 1; i < ll.Count; ++i)
-                        {
-                            line = String.Format("-{0}", ll[i] + 1);
-                            setWriter.WriteLine(line);
-                        }
+                        List<int> pics = new List<int>();
+                        pics.AddRange(set);
+                        setWriter.WriteLine("+{0}", pics[0]+1);
+                        for (int i = 1; i < pics.Count; ++i)
+                            setWriter.WriteLine("-{0}", pics[i] + 1);
                     }
                 }
             }
         }
 
-        private void analyze(List<long> picList)
-        {
-            var w4it = new Wait4It();
-            var values = new double[picList.Count];
-            double lowest, highest;
-            getDiscrimatorValues(picList, values, out lowest, out highest);
-            if (highest - lowest < MinimalDiff)
-            {
-                lock (countLock)
-                {
-                    listLengthDone += picList.Count;
-                }
-                Task.Run(() => match(picList));
-            }
-            else
-            {
-                var lowerPart = (3 * highest + 2 * lowest) / 5;
-                var higherPart = (2 * highest + 3 * lowest) / 5;
-                var lists = new List<long>[2];
-                for (int i = 0; i < 2; ++i)
-                    lists[i] = new List<long>();
-                for (int picNum = 0; picNum < values.Length; ++picNum)
-                {
-                    if (values[picNum] < lowerPart)
-                        lists[0].Add(picList[picNum]);
-                    if (values[picNum] > higherPart)
-                        lists[1].Add(picList[picNum]);
-                }
-                lock (countLock)
-                {
-                    listLengthDone += picList.Count;
-                    listLength2run += lists[0].Count + lists[1].Count;
-                }
-                Task.Run(() => analyze(lists[0]));
-                Task.Run(() => analyze(lists[1]));
 
+
+        private void analyze(List<int> picList)
+        {
+            long newLists = 0;
+            try
+            {
+                var w4it = new Wait4It();
+                var values = new double[picList.Count];
+                double lowest, highest;
+                getDiscrimatorValues(picList, values, out lowest, out highest);
+                if (highest - lowest < MinimalDiff)
+                {
+                    Task.Run(() => match(picList));
+                    var sz = picList.Count;
+                    newLists += sz * (sz - 1) / 2;
+
+                }
+                else
+                {
+                    var highCut = (3 * highest + 2 * lowest) / 5;
+                    var lowCut = (2 * highest + 3 * lowest) / 5;
+                    var middle = (highest + lowest) / 2;
+                    var lists = new List<int>[3];
+                    for (int i = 0; i < lists.Length; ++i)
+                        lists[i] = new List<int>();
+                    for (int picNum = 0; picNum < values.Length; ++picNum)
+                    {
+                        var v = values[picNum];
+                        var p = picList[picNum];
+                        if (v < middle)
+                        {
+                            lists[0].Add(p);
+                            if (v > lowCut)
+                                lists[1].Add(p);
+                        }
+                        else
+                        {
+                            lists[2].Add(p);
+                            if (v < highCut)
+                                lists[1].Add(p);
+                        }
+                        
+                    }
+
+                    foreach (var l in lists)
+                    {
+                        var sz = l.Count;
+                        if (sz <= 1)
+                            continue; // no point in doing that.
+                        newLists += sz * (sz - 1) / 2;
+                        if (l.Count > 32)
+                            Task.Run(() => analyze(l));
+                        else
+                            Task.Run(() => match(l));
+                    }
+                }
+            }
+            finally
+            {
+                long n = picList.Count;
+                lock (countLock)
+                {
+                    n = n * (n - 1) / 2 - newLists;
+                    matchesDone += n;
+                }
             }
         }
 
-        private void getDiscrimatorValues(List<long> picList, double[] values, out double lowest, out double highest)
+        private void getDiscrimatorValues(List<int> picList, double[] values, out double lowest, out double highest)
         {
+
+
             var picBytes = new byte[ChunkSize];
-            acc.ReadArray(picList[0] * ChunkSize, picBytes, 0, ChunkSize);
+            int r;
+            lock (mmfLock)
+            {
+                r = acc.ReadArray(picList[0] * ChunkSize, picBytes, 0, ChunkSize);
+            }
+
             var disc = new double[ChunkSize];
+            double total = 0;
             for (int i = 0; i < ChunkSize; ++i)
-                disc[i] = picBytes[i];
+                total += disc[i] = picBytes[i];
+            if (total == 0)
+            {
+                Console.Error.WriteLine("black picture?");
+            }
             lowest = highest = 0;
             var leftPic = new double[ChunkSize];
             var rightPic = new double[ChunkSize];
@@ -196,10 +217,14 @@ namespace Discriminator
                 for (int picNum = 0; picNum < lastPicNum; ++picNum)
                 {
                     var pic = picList[picNum];
-                    double total = 0;
-                    acc.ReadArray(pic * ChunkSize, picBytes, 0, ChunkSize);
+                    total = 0;
+                    lock (mmfLock)
+                    {
+                        r = acc.ReadArray(pic * ChunkSize, picBytes, 0, ChunkSize);
+                    }
+
                     for (int i = 0; i < ChunkSize; ++i)
-                        total = disc[i] * picBytes[i];
+                        total += disc[i] * picBytes[i];
                     values[picNum] = total;
                 }
                 lowest = values[0];
@@ -211,15 +236,19 @@ namespace Discriminator
                     if (values[i] > highest)
                         highest = values[i];
                 }
-                if (highest - lowest < MinimalDiff)
-                    break;
+                //if (highest - lowest < MinimalDiff)
+                //    break;
                 var discValue = (highest + lowest) / 2.0;
                 if (iter < MaxIter - 1)
                 {
                     for (int picNum = 0; picNum < lastPicNum; ++picNum)
                     {
                         var pic = picList[picNum];
-                        acc.ReadArray(pic * ChunkSize, picBytes, 0, ChunkSize);
+                        lock (mmfLock)
+                        {
+                            r = acc.ReadArray(pic * ChunkSize, picBytes, 0, ChunkSize);
+                        }
+
                         if (values[picNum] < discValue)
                         {
                             for (int i = 0; i < ChunkSize; ++i)
@@ -238,160 +267,72 @@ namespace Discriminator
                 }
             }
 
-
         }
 
-        private void analyze2(List<long> picList)
+
+        private void match(List<int> l)
         {
             var w4it = new Wait4It();
-            // the discriminator
-            var picBytes = new byte[ChunkSize];
-            var firstPic = picList[0];
-            acc.ReadArray(firstPic * ChunkSize, picBytes, 0, ChunkSize);
-            var disc = new double[ChunkSize];
-            for (int i = 0; i < ChunkSize; ++i)
-                disc[i] = picBytes[i];
-            var leftPic = new double[ChunkSize];
-            long leftPictures = 1;
-            long rightPictures = 1;
-            double middleValue = 0;
-            double lowest = 0, highest = 0;
-            var rightPic = new double[ChunkSize];
-            for (int iter = 0; iter < 100; ++iter)
+            try
             {
-                /*
-                leftPictures = rightPictures = 1;
-                for (int i = 0; i < ChunkSize; ++i)
-                    leftPic[i] = rightPic[i] = 0;
-                */
-                lowest = Double.PositiveInfinity;
-                highest = Double.NegativeInfinity;
-                int p = 0;
-                foreach (var pic in picList)
+                if (l.Count <= 1)
+                    return;
+                var picBytes = new byte[ChunkSize];
+                var otherBytes = new byte[ChunkSize];
+                for (int j = 1; j < l.Count; ++j)
                 {
-                    double total = 0;
-                    if (++p > 500)
-                        break;
-                    acc.ReadArray(pic * ChunkSize, picBytes, 0, ChunkSize);
-                    for (int i = 0; i < ChunkSize; ++i)
-                        total = disc[i] * picBytes[i];
-                    if (total > middleValue)
+                    var pic2 = l[j];
+                    lock (mmfLock)
                     {
-                        for (int i = 0; i < ChunkSize; ++i)
-                            rightPic[i] += picBytes[i];
-                        ++rightPictures;
+                        acc.ReadArray(pic2 * ChunkSize, picBytes, 0, ChunkSize);
                     }
-                    else
+                    for (int i = 0; i < j; ++i)
                     {
-                        for (int i = 0; i < ChunkSize; ++i)
-                            leftPic[i] += picBytes[i];
-                        ++leftPictures;
+                        var pic1 = l[i];
+                        lock (considered)
+                        {
+                            var t = Tuple.Create(pic1, pic2);
+                            var b = considered.Add(t);
+                            if (!b) // have it already
+                                continue;
+                        }
+                        lock (mmfLock)
+                        {
+                            acc.ReadArray(pic1 * ChunkSize, otherBytes, 0, ChunkSize);
+                        }
+                        bool noMatch = false;
+                        int total = 0;
+                        for (var k = 0; k < ChunkSize; ++k)
+                        {
+                            int d = otherBytes[k] - picBytes[k];
+                            total += d;
+                            if (Math.Abs(d) > MaxDiff)
+                            {
+                                noMatch = true;
+                                break;
+                            }
+                        }
+                        if (noMatch)
+                            continue;
+                            lock (matches)
+                            {
+                                var t = Tuple.Create(pic1, pic2);
+                                matches.Add(t);
+                            }
                     }
-                    if (total > highest) highest = total;
-                    if (total < lowest) lowest = total;
-                }
-                for (int i = 0; i < ChunkSize; ++i)
-                    disc[i] = rightPic[i] / rightPictures - leftPic[i] / leftPictures;
-                middleValue = (highest + lowest) / 2.0;
-            }
-            // now dividing the list into three
-            var lists = new List<long>[3];
-            for (int i = 0; i < 3; ++i)
-                lists[i] = new List<long>();
-            var middleLeft = (3 * lowest + 2 * highest) / 5;
-            var middleRight = (2 * lowest + 3 * highest) / 5;
-            foreach (var pic in picList)
-            {
-                acc.ReadArray(pic * ChunkSize, picBytes, 0, ChunkSize);
-                double total = 0;
-                for (int i = 0; i < ChunkSize; ++i)
-                    total = disc[i] * picBytes[i];
-                if (total > middleValue)
-                {
-                    lists[2].Add(pic);
-                    if (total < middleRight)
-                        lists[1].Add(pic);
-                }
-                else
-                {
-                    lists[0].Add(pic);
-                    if (total > middleLeft)
-                        lists[1].Add(pic);
                 }
             }
-            Console.Out.WriteLine("Lists {0} {1} {2}", lists[0].Count, lists[1].Count, lists[2].Count);
-            for (int i = 0; i < 3; ++i)
+            finally
             {
-                var l = lists[i];
-                if (l.Count > 0)
+                lock (countLock)
                 {
-                    Task t;
-                    if (l.Count < 16)
-                        t = Task.Run(() => match(l));
-                    else
-                        t = Task.Run(() => analyze(l));
+                    matchesDone += l.Count * (l.Count - 1) / 2;
+                }
+            }
 
-                }
-            }
         }
 
-        private void match(List<long> l)
-        {
-            var w4it = new Wait4It();
-            Console.Out.WriteLine("matching list with {0}", l.Count);
-            var picBytes = new byte[ChunkSize];
-            var otherPicBytes = new byte[ChunkSize];
-            for (int i = 1; i < l.Count; ++i)
-            {
-                var pic = l[i];
-                acc.ReadArray(pic * ChunkSize, picBytes, 0, ChunkSize);
-                for (int j = 0; j < i; ++j) // only halv
-                {
-                    var opic = l[j];
-                    if (haveIt(opic, pic))
-                    {
-                        // Console.Out.WriteLine("not doing match twice");
-                        continue;
-                    }
-                    ++totalMatches;
-                    acc.ReadArray(opic * ChunkSize, otherPicBytes, 0, ChunkSize);
-                    double total = 0;
-                    for (int k = 0; k < ChunkSize; ++k)
-                        total += Math.Abs(otherPicBytes[k] - picBytes[k]);
-                    total /= ChunkSize;
-                    if (total < 255 / 5) // 20% difference 
-                    {
-                        Console.Out.WriteLine("seems similar {0} {1}", opic, pic);
-                        submit(opic, pic, true);
-                    }
-                    else submit(opic, pic, false);
-                }
-            }
-        }
 
-        private bool haveIt(long opic, long pic)
-        {
-            lock (myLock)
-            {
-                return matches.ContainsKey(new Tuple<long, long>(opic, pic));
-            }
-        }
 
-        private void submit(long opic, long pic, bool v)
-        {
-            lock (myLock)
-            {
-
-                var key = new Tuple<long, long>(opic, pic);
-                bool b;
-                if (matches.TryGetValue(key, out b))
-                {
-                    if (b != v)
-                        Console.Out.WriteLine("the horror");
-                }
-                else
-                    matches.Add(key, v);
-            }
-        }
     }
 }

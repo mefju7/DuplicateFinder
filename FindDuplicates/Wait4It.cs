@@ -4,6 +4,7 @@ namespace Discriminator
 {
     internal class Wait4It
     {
+        private static int lastNumber;
         private static object lockObject = new object();
         private static int simultaneous = 0;
         public Wait4It()
@@ -21,12 +22,18 @@ namespace Discriminator
             }
         }
 
-        public static bool Working {
-            get {
+        public static bool Working
+        {
+            get
+            {
                 // Console.Out.WriteLine("have approx {0}", simultaneous);
-                var rv = simultaneous > 0;
-                GC.Collect();
-                return rv;
+                if (simultaneous == lastNumber)
+                {
+                    //Console.Out.WriteLine("forcing GC.collect();");
+                    GC.Collect();
+                }
+                lastNumber = simultaneous;
+                return simultaneous > 0;
             }
         }
     }

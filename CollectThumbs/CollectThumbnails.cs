@@ -18,14 +18,24 @@ namespace ThumbCollector
         long finished = 0;
         private StreamWriter txtFile;
         private FileStream binFile;
+        private StreamWriter blackFile;
+        private Image.GetThumbnailImageAbort myThumbnailCallback;
 
         public CollectThumbnails()
         {
+            myThumbnailCallback = new Image.GetThumbnailImageAbort(ThumbnailCallback);
+        }
+
+        public bool ThumbnailCallback()
+        {
+            Console.Out.WriteLine("thumbnail callback");
+            return false;
         }
 
         internal void run(string[] args)
         {
             using (txtFile = File.CreateText("files.txt"))
+            using (blackFile = File.CreateText("blacks.txt"))
             using (binFile = File.OpenWrite("files.bin"))
             {
                 {
@@ -45,7 +55,7 @@ namespace ThumbCollector
                     var finishAt = DateTime.Now;
                     if (t2 > 0)
                     {
-                        per = t1 / t2;          
+                        per = t1 / t2;
                         var ts = finishAt.Subtract(startedAt);
                         double s2w = 0;
                         if (t1 > 0)
@@ -97,7 +107,9 @@ namespace ThumbCollector
                     int w = img.Width;
                     if (h > 16) h = 16;
                     if (w > 16) w = 16;
-                    using (var bmp = new Bitmap(img, w, h))
+                    Image tmb;
+                    using (tmb=img.GetThumbnailImage(w,h,myThumbnailCallback,IntPtr.Zero))
+                    using (var bmp = new Bitmap(tmb, w, h))
                     {
                         var b = new byte[ChunkSize];
                         for (int i = 0; i < bmp.Height; ++i)
@@ -112,7 +124,13 @@ namespace ThumbCollector
                                 b[idx + 2] = c.B;
                             }
                         }
-                        store(f, b);
+                        int total = 0;
+                        for (int i = 0; i < ChunkSize; ++i)
+                            total += b[i];
+                        if (total > 0)
+                            store(f, b);
+                        else
+                            storeBlack(f);
                     }
                 }
             }
@@ -126,6 +144,15 @@ namespace ThumbCollector
                 {
                     ++finished;
                 }
+            }
+        }
+
+        private void storeBlack(string f)
+        {
+            lock (myLock)
+            {
+                blackFile.WriteLine(f);
+                ++saved;
             }
         }
 

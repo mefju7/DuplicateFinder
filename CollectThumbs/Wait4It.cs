@@ -27,7 +27,6 @@ namespace ThumbCollector
                 // Console.Out.WriteLine("have approx {0}", simultaneous);
                 if (simultaneous == lastNumber)
                 {
-                    Console.Out.WriteLine("forcing GC.collect();");
                     GC.Collect();
                 }
                 lastNumber = simultaneous;
