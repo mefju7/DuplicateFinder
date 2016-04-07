@@ -54,10 +54,10 @@ namespace Discriminator
                     while (Wait4It.Working)
                     {
                         var finishAt = DateTime.Now;
-                        if (listLength2run > 0)
-                        {
                             double t1 = listLengthDone;
                             double t2 = listLength2run;
+                        if (listLength2run > 0)
+                        {
                             per = t1 / t2;
                             var ts = finishAt.Subtract(startedAt);
                             double s2w = 0; //seconds to wait
@@ -66,7 +66,7 @@ namespace Discriminator
                             finishAt = finishAt.AddSeconds(s2w);
 
                         }
-                        Console.WriteLine("divide {0} -- {1}", totalMatches, finishAt.ToString("HH:mm:ss"));
+                        Console.WriteLine("divide {0:#,0} / {1:#,0} --> matches {2}, finished at {3}", t1, t2, totalMatches, finishAt.ToString("HH:mm:ss"));
                         Thread.Sleep(2000);
                     }
                 }
@@ -359,7 +359,7 @@ namespace Discriminator
                     for (int k = 0; k < ChunkSize; ++k)
                         total += Math.Abs(otherPicBytes[k] - picBytes[k]);
                     total /= ChunkSize;
-                    if (total < 255 / 5) // 5% difference 
+                    if (total < 255 / 5) // 20% difference 
                     {
                         Console.Out.WriteLine("seems similar {0} {1}", opic, pic);
                         submit(opic, pic, true);
