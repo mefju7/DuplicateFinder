@@ -12,10 +12,12 @@ namespace Discriminator
     {
         private const int ChunkSize = 3 * 16 * 16;
         private const string BinFile = "files.bin";
+        private const string FilesFile = "files.txt";
+        private const string SetFile = "sets.txt";
         private const int MaxIter = 16;
         private const int MaxPicturesInDiscriminator = 32;
-        private const double MinimalDiff = ChunkSize*3; // 
-        private const int MaxDiff = 64;
+        private const double MinimalDiff = ChunkSize * 3; // 
+        private const int MaxDiff = 32;
         object myLock = new object(); // just for synchronizing
         object countLock = new object(); // for synchronizing counting
         HashSet<Tuple<int, int>> considered = new HashSet<Tuple<int, int>>();
@@ -24,9 +26,23 @@ namespace Discriminator
         private long matchesDone = 0;
         private MemoryMappedViewAccessor acc;
         private object mmfLock = new object();
+        private int[] shiftPos;
+        private int[] diffCounts = new int[256];
+        
 
         public FindDuplicates()
         {
+            shiftPos = new int[24];
+            int p = 0;
+            int r = 2;
+            for (int i = -r; i <= r; ++i)
+                for (int j = -r; j <= r; ++j)
+                {
+                    int k = (i * 16 + j) * 3;
+                    if (k == 0)
+                        continue;
+                    shiftPos[p++] = k;
+                }
         }
 
         internal void run()
@@ -56,18 +72,24 @@ namespace Discriminator
                     {
                         per = matchesDone / totalMatches;
                         var finishAt = leftTime.get(totalMatches - matchesDone);
-                        Console.WriteLine("divide {0:#,0} / {1:#,0} ({2:0%}) --> cand {3}, finished at {4}",
+                        Console.WriteLine("divide {0:#,0} / {1:#,0} ({2:0%}) --> pairs {3}, finished at {4}",
                             matchesDone, totalMatches, per, matches.Count, finishAt.ToString("MM-dd HH:mm:ss"));
                         Thread.Sleep(2000);
                     }
                 }
+                /* for(int i=0;i<diffCounts.Length;++i)
+                {
+                    Console.Out.WriteLine("diff {0} {1}", i, diffCounts[i]);
+                }
+                */
+                Console.Out.WriteLine("");
                 Console.Out.WriteLine("Combining");
                 Dictionary<int, HashSet<int>> sets = new Dictionary<int, HashSet<int>>();
-                foreach(var m in matches)
+                foreach (var m in matches)
                 {
                     var nhs = new HashSet<int>();
                     var items = new int[] { m.Item1, m.Item2 };
-                    foreach(var it in items)
+                    foreach (var it in items)
                     {
                         nhs.Add(it);
                         HashSet<int> oldOne;
@@ -76,7 +98,7 @@ namespace Discriminator
                             nhs.UnionWith(oldOne);
                         }
                     }
-                    foreach(var it in nhs)
+                    foreach (var it in nhs)
                     {
                         sets.Remove(it);
                         sets.Add(it, nhs);
@@ -86,7 +108,7 @@ namespace Discriminator
                 keys.AddRange(sets.Keys);
                 List<HashSet<int>> allSets = new List<HashSet<int>>();
                 int totalCount = 0;
-                foreach(var it in keys)
+                foreach (var it in keys)
                 {
                     HashSet<int> foundSet;
                     if (sets.TryGetValue(it, out foundSet))
@@ -97,16 +119,17 @@ namespace Discriminator
                             sets.Remove(k);
                     }
                 }
-                Console.WriteLine("found {0} duplicates", totalCount - allSets.Count);
+                Console.WriteLine("found {0} duplicates in {1} sets", totalCount - allSets.Count, allSets.Count);
+                var fileNames=File.ReadAllLines(FilesFile);
                 using (var setWriter = File.CreateText("sets.txt"))
                 {
-                    foreach(var set in allSets)
+                    foreach (var set in allSets)
                     {
                         List<int> pics = new List<int>();
                         pics.AddRange(set);
-                        setWriter.WriteLine("+{0}", pics[0]+1);
+                        setWriter.WriteLine("{0}", fileNames[pics[0]]);
                         for (int i = 1; i < pics.Count; ++i)
-                            setWriter.WriteLine("-{0}", pics[i] + 1);
+                            setWriter.WriteLine("\t{0}", fileNames[pics[i]]);
                     }
                 }
             }
@@ -154,7 +177,7 @@ namespace Discriminator
                             if (v < highCut)
                                 lists[1].Add(p);
                         }
-                        
+
                     }
 
                     foreach (var l in lists)
@@ -270,25 +293,25 @@ namespace Discriminator
         }
 
 
-        private void match(List<int> l)
+        private void match(List<int> picList)
         {
             var w4it = new Wait4It();
             try
             {
-                if (l.Count <= 1)
+                if (picList.Count <= 1)
                     return;
-                var picBytes = new byte[ChunkSize];
-                var otherBytes = new byte[ChunkSize];
-                for (int j = 1; j < l.Count; ++j)
+                var pic2Bytes = new byte[ChunkSize];
+                var pic1Bytes = new byte[ChunkSize];
+                for (int picNum2 = 1; picNum2 < picList.Count; ++picNum2)
                 {
-                    var pic2 = l[j];
+                    var pic2 = picList[picNum2];
                     lock (mmfLock)
                     {
-                        acc.ReadArray(pic2 * ChunkSize, picBytes, 0, ChunkSize);
+                        acc.ReadArray(pic2 * ChunkSize, pic2Bytes, 0, ChunkSize);
                     }
-                    for (int i = 0; i < j; ++i)
+                    for (int picNum1 = 0; picNum1 < picNum2; ++picNum1)
                     {
-                        var pic1 = l[i];
+                        var pic1 = picList[picNum1];
                         lock (considered)
                         {
                             var t = Tuple.Create(pic1, pic2);
@@ -298,27 +321,39 @@ namespace Discriminator
                         }
                         lock (mmfLock)
                         {
-                            acc.ReadArray(pic1 * ChunkSize, otherBytes, 0, ChunkSize);
+                            acc.ReadArray(pic1 * ChunkSize, pic1Bytes, 0, ChunkSize);
                         }
-                        bool noMatch = false;
-                        int total = 0;
+                        
+                        int maxDiff = 0;
+                        int totalDiff = 0;
                         for (var k = 0; k < ChunkSize; ++k)
                         {
-                            int d = otherBytes[k] - picBytes[k];
-                            total += d;
-                            if (Math.Abs(d) > MaxDiff)
+                            int d = pic1Bytes[k] - pic2Bytes[k];
+                            d = Math.Abs(d);
+                            // looking for the nearest match
+                            for(int s=0; s<shiftPos.Length;++s )
                             {
-                                noMatch = true;
-                                break;
+                                int p = k + shiftPos[s];
+                                if (p < 0 || p >= ChunkSize)
+                                    continue;
+                                int d2 = pic1Bytes[p] - pic2Bytes[k];
+                                d2 = Math.Abs(d2);
+                                if (d2 < d)
+                                    d = d2;
                             }
+                            if (maxDiff < d)
+                                maxDiff = d;
+                            totalDiff += d;
                         }
-                        if (noMatch)
+                        ++diffCounts[maxDiff];
+                        // Console.Out.WriteLine("got maxdiff {0}", maxDiff);
+                        if (maxDiff>MaxDiff)
                             continue;
-                            lock (matches)
-                            {
-                                var t = Tuple.Create(pic1, pic2);
-                                matches.Add(t);
-                            }
+                        lock (matches)
+                        {
+                            var t = Tuple.Create(pic1, pic2);
+                            matches.Add(t);
+                        }
                     }
                 }
             }
@@ -326,7 +361,7 @@ namespace Discriminator
             {
                 lock (countLock)
                 {
-                    matchesDone += l.Count * (l.Count - 1) / 2;
+                    matchesDone += picList.Count * (picList.Count - 1) / 2;
                 }
             }
 

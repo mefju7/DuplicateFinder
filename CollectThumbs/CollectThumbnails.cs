@@ -50,7 +50,7 @@ namespace ThumbCollector
         {
             using (txtFile = File.CreateText("files.txt"))
             using (blackFile = File.CreateText("blacks.txt"))
-            using (binFile = File.OpenWrite("files.bin"))
+            using (binFile = File.Create("files.bin"))
             {
                 {
                     foreach (var a in args)
@@ -138,9 +138,24 @@ namespace ThumbCollector
                                 b[idx + 2] = c.B;
                             }
                         }
+                        var b2 = new byte[ChunkSize];
+                        for(int i = 0; i < ChunkSize; ++i)
+                        {
+                            double d = 0;
+                            double w2 = 0;
+                            for(int j = 0; j < shiftPos.Length; ++j)
+                            {
+                                int k = i + shiftPos[j];
+                                if ((k < 0) || (k >= ChunkSize))
+                                    continue;
+                                w2 += blurring[j];
+                                d += blurring[j] * b[k];
+                            }
+                            b2[i] = (byte) Math.Floor(d / w2);
+                        }
                         int total = 0;
                         for (int i = 0; i < ChunkSize; ++i)
-                            total += b[i];
+                            total += b2[i];
                         if (total > 0)
                             store(f, b);
                         else
