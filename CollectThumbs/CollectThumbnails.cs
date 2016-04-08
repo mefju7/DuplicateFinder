@@ -10,7 +10,9 @@ namespace ThumbCollector
     internal class CollectThumbnails
     {
         private const int ChunkSize = 3 * 16 * 16;
+
         private const int DisplayDelay = 2;
+        private const double blurStDev = 4;
         object myLock = new object(); // just for synchronizing
         long saved = 0;
         object countLock = new object();
@@ -20,10 +22,22 @@ namespace ThumbCollector
         private FileStream binFile;
         private StreamWriter blackFile;
         private Image.GetThumbnailImageAbort myThumbnailCallback;
+        private int[] shiftPos;
+        private double[] blurring;
 
         public CollectThumbnails()
         {
             myThumbnailCallback = new Image.GetThumbnailImageAbort(ThumbnailCallback);
+            shiftPos = new int[25];
+            blurring = new double[25];
+            int k=0;
+            for (int i = -2; i <= 2; ++i)
+                for(int j=-2;j<= 2; ++j,++k)
+                {
+                    shiftPos[k] = (i * 16+j)*3; // remember 3 bytes per pixel
+                    double d = (i * i + j * j);
+                    blurring[k] = Math.Exp(-d / blurStDev);
+                }
         }
 
         public bool ThumbnailCallback()
