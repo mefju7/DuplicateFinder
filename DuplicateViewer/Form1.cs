@@ -58,7 +58,7 @@ namespace DuplicateViewer
                 }
                 trackBar1.Minimum = 0;
                 trackBar1.Maximum = fileSets.Count-1;
-                statusLine.Text = string.Format("{0} sets of total {1} files", fileSets.Count, lines.Length);
+                Text = string.Format("{0} sets of total {1} files", fileSets.Count, lines.Length);
                 for(int c = 1; c < setMax; ++c)
                 {
                     if(c*c > setMax)
@@ -80,19 +80,21 @@ namespace DuplicateViewer
      
             var picList = fileSets[num];
             int cols = 1;
-            for (; cols * cols < picList.Count; ++cols) ;
-            for (int i = 0; i < picList.Count; ++i)
+            var count = picList.Count;
+            if (count > 64)
+                count = 64;
+            for (; cols * cols < count; ++cols) ;
+            for (int i = 0; i < count; ++i)
             {
                 var pb = new PictureBox();
                 pb.SizeMode = PictureBoxSizeMode.Zoom;
-            
+                //pb.LoadCompleted += Pb_LoadCompleted;
                 pb.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top;
                 tabPanel.Controls.Add(pb,i% cols,i/cols);
                 pb.LoadAsync(picList[i]);
             }
             statusLine.Text = string.Format("loaded set {0}", num + 1);
         }
-
-       
+        
     }
 }

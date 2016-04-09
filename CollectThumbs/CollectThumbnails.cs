@@ -48,6 +48,7 @@ namespace ThumbCollector
 
         internal void run(string[] args)
         {
+            Console.Out.WriteLine("storing data in {0}",Directory.GetCurrentDirectory());
             using (txtFile = File.CreateText("files.txt"))
             using (blackFile = File.CreateText("blacks.txt"))
             using (binFile = File.Create("files.bin"))
@@ -55,6 +56,7 @@ namespace ThumbCollector
                 {
                     foreach (var a in args)
                     {
+                        Console.Out.WriteLine("start scanning from {0}", a);
                         var t = Task.Run(() => scan(a));
                     }
                 }
